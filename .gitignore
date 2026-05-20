@@ -1,0 +1,46 @@
+# Artefatos locais e binários
+aws/
+awscliv2.zip
+
+# Chaves e segredos
+*.pem
+*.ppk
+*.key
+id_rsa
+id_rsa.*
+*_rsa
+*_rsa.pub
+*.pub
+*.crt
+*.cer
+*.p12
+*.pfx
+.env
+.env.*
+!.env.template
+credentials/
+**/credentials/
+*credentials*
+*accessKeys*
+*secret*
+*token*
+*.csv
+
+
+# Dados e saídas geradas localmente
+teste.fastq
+teste_fastqc.html
+*.fastq
+*.fq
+*.bam
+*.cram
+*.vcf
+
+# Python e cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
