@@ -35,6 +35,12 @@ teste_fastqc.html
 *.bam
 *.cram
 *.vcf
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.html
+.ipynb_checkpoints/
 
 # Python e cache
 __pycache__/

@@ -15,8 +15,23 @@ az account set --subscription "<SUBSCRIPTION_ID>"
 export AZ_RESOURCE_GROUP="rg-bioinformatica-lab"
 export AZ_LOCATION="brazilsouth"
 export AZ_VM_NAME="vm-bio-lab"
-export AZ_STORAGE_ACCOUNT="stbio$RANDOM$RANDOM"
+export AZ_STORAGE_ACCOUNT="stbioseunome2026"
 export AZ_CONTAINER="raw-data"
+```
+
+### Salvar e Carregar Variáveis
+```bash
+mkdir -p ~/azure-bioinformatica/credentials
+
+cat > ~/azure-bioinformatica/credentials/.env << EOF
+AZ_RESOURCE_GROUP=$AZ_RESOURCE_GROUP
+AZ_LOCATION=$AZ_LOCATION
+AZ_VM_NAME=$AZ_VM_NAME
+AZ_STORAGE_ACCOUNT=$AZ_STORAGE_ACCOUNT
+AZ_CONTAINER=$AZ_CONTAINER
+EOF
+
+source ~/azure-bioinformatica/credentials/.env
 ```
 
 ### Criar Resource Group
@@ -33,6 +48,8 @@ az group show --name $AZ_RESOURCE_GROUP --output table
 
 ## STORAGE - BLOB
 
+Comandos desta seção devem ser executados no notebook/terminal local. Se o prompt for `azureuser@vm-bio-lab`, você está dentro da VM; rode `exit` para voltar ao terminal local ou instale Azure CLI na VM antes.
+
 ### Criar Storage Account
 ```bash
 az storage account create \
@@ -43,6 +60,30 @@ az storage account create \
   --kind StorageV2
 ```
 
+### Confirmar Storage Account
+```bash
+source ~/azure-bioinformatica/credentials/.env
+echo $AZ_STORAGE_ACCOUNT
+
+az storage account show \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_STORAGE_ACCOUNT \
+  --query "{name:name, location:primaryLocation, status:statusOfPrimary}" \
+  --output table
+```
+
+### Corrigir Nome da Storage Account
+```bash
+az storage account list \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --query "[].name" \
+  --output table
+
+export AZ_STORAGE_ACCOUNT="NOME_QUE_APARECEU_NA_LISTA"
+nano ~/azure-bioinformatica/credentials/.env
+source ~/azure-bioinformatica/credentials/.env
+```
+
 ### Criar Container
 ```bash
 az storage container create \
@@ -50,6 +91,24 @@ az storage container create \
   --account-name $AZ_STORAGE_ACCOUNT \
   --auth-mode login
 ```
+
+### Permissao para Upload com Login
+```bash
+export AZ_USER_OBJECT_ID=$(az ad signed-in-user show --query id --output tsv)
+
+export AZ_STORAGE_SCOPE=$(az storage account show \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_STORAGE_ACCOUNT \
+  --query id \
+  --output tsv)
+
+az role assignment create \
+  --assignee $AZ_USER_OBJECT_ID \
+  --role "Storage Blob Data Contributor" \
+  --scope $AZ_STORAGE_SCOPE
+```
+
+Aguarde 1 a 5 minutos para a permissão propagar.
 
 ### Upload de Arquivo
 ```bash
@@ -61,11 +120,43 @@ az storage blob upload \
   --auth-mode login
 ```
 
-### Upload de Diretório com AzCopy
+### Upload de Diretório com Azure CLI
 ```bash
-azcopy login
+az storage blob upload-batch \
+  --account-name $AZ_STORAGE_ACCOUNT \
+  --destination $AZ_CONTAINER \
+  --destination-path raw-data \
+  --source ~/dados \
+  --auth-mode login \
+  --overwrite
+```
 
-azcopy copy "~/dados/*" \
+### Upload de Diretório com Chave
+```bash
+az storage blob upload-batch \
+  --account-name $AZ_STORAGE_ACCOUNT \
+  --destination $AZ_CONTAINER \
+  --destination-path raw-data \
+  --source ~/dados \
+  --auth-mode key \
+  --overwrite
+```
+
+### AzCopy Opcional
+```bash
+# AzCopy pode exigir conta corporativa/escolar no login.
+# Para conta pessoal Microsoft, prefira az storage blob upload-batch.
+
+azcopy --version
+
+cd /tmp
+wget https://aka.ms/downloadazcopy-v10-linux -O azcopy.tar.gz
+tar -xzf azcopy.tar.gz
+sudo cp ./azcopy_linux_amd64_*/azcopy /usr/local/bin/
+azcopy --version
+
+azcopy login
+azcopy copy "$HOME/dados/*" \
   "https://$AZ_STORAGE_ACCOUNT.blob.core.windows.net/$AZ_CONTAINER/raw-data/" \
   --recursive=true
 ```
@@ -138,21 +229,50 @@ az vm create \
   --public-ip-sku Standard
 ```
 
-### Abrir Porta
+### Abrir Porta SSH
 ```bash
 az vm open-port \
   --resource-group $AZ_RESOURCE_GROUP \
   --name $AZ_VM_NAME \
   --port 22
-
-az vm open-port \
-  --resource-group $AZ_RESOURCE_GROUP \
-  --name $AZ_VM_NAME \
-  --port 8888
 ```
 
-### Obter IP Público
+Para JupyterLab, use túnel SSH em vez de abrir a porta 8888.
+
+### Obter IP Público da VM
 ```bash
+export AZ_VM_IP=$(az vm show \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_VM_NAME \
+  --show-details \
+  --query publicIps \
+  --output tsv)
+
+echo $AZ_VM_IP
+```
+
+Não use `ip a`, `hostname -I` ou `ifconfig` para preencher `AZ_VM_IP`. Esses comandos mostram IPs do notebook local, não o IP público da VM Azure.
+
+### Conectar via SSH
+```bash
+ssh-keyscan -H $AZ_VM_IP >> ~/.ssh/known_hosts 2>/dev/null
+
+ssh -i ~/azure-bioinformatica/keys/azure_bio_rsa azureuser@$AZ_VM_IP
+
+ssh -i ~/azure-bioinformatica/keys/azure_bio_rsa \
+  -L 8888:localhost:8888 \
+  azureuser@$AZ_VM_IP
+```
+
+### IP Errado para SSH
+```bash
+# Estes IPs normalmente sao locais/VPN, nao sao o IP publico da VM:
+# 192.168.x.x
+# 10.x.x.x
+# 172.16.x.x ate 172.31.x.x
+# 100.x.x.x (Tailscale)
+
+# Use sempre:
 az vm show \
   --resource-group $AZ_RESOURCE_GROUP \
   --name $AZ_VM_NAME \
@@ -161,28 +281,40 @@ az vm show \
   --output tsv
 ```
 
-### Conectar via SSH
+### Parar, Confirmar e Iniciar VM
 ```bash
-ssh -i ~/azure-bioinformatica/keys/azure_bio_rsa azureuser@<SEUIP>
+source ~/azure-bioinformatica/credentials/.env
 
-ssh -i ~/azure-bioinformatica/keys/azure_bio_rsa \
-  -L 8888:localhost:8888 \
-  azureuser@<SEUIP>
-```
-
-### Parar, Iniciar e Remover VM
-```bash
-# Parar cobrança de compute
+# Parar cobrança de compute e manter VM para uso futuro
 az vm deallocate \
   --resource-group $AZ_RESOURCE_GROUP \
   --name $AZ_VM_NAME
+
+# Confirmar estado esperado: VM deallocated
+az vm get-instance-view \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_VM_NAME \
+  --query instanceView.statuses[].displayStatus \
+  --output table
 
 # Iniciar novamente
 az vm start \
   --resource-group $AZ_RESOURCE_GROUP \
   --name $AZ_VM_NAME
 
-# Remover VM
+# Pegar IP publico novamente apos iniciar
+export AZ_VM_IP=$(az vm show \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_VM_NAME \
+  --show-details \
+  --query publicIps \
+  --output tsv)
+```
+
+Com `VM deallocated`, o compute está parado. Discos, Storage Account e alguns recursos de rede continuam existindo para permitir retomar o laboratório depois.
+
+### Remover VM
+```bash
 az vm delete \
   --resource-group $AZ_RESOURCE_GROUP \
   --name $AZ_VM_NAME \
@@ -247,7 +379,23 @@ print(f"Qualidade média: {np.mean(qualidades):.2f}")
 
 ## JUPYTER
 
-### Instalar e Rodar JupyterLab
+### Túnel SSH Local para Jupyter
+```bash
+source ~/azure-bioinformatica/credentials/.env
+
+export AZ_VM_IP=$(az vm show \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_VM_NAME \
+  --show-details \
+  --query publicIps \
+  --output tsv)
+
+ssh -i ~/azure-bioinformatica/keys/azure_bio_rsa \
+  -L 8888:localhost:8888 \
+  azureuser@$AZ_VM_IP
+```
+
+### Instalar e Rodar JupyterLab na VM
 ```bash
 source ~/bio_env/bin/activate
 pip install jupyter jupyterlab
@@ -255,16 +403,29 @@ pip install jupyter jupyterlab
 jupyter lab --ip=127.0.0.1 --port=8888 --no-browser
 ```
 
-### Túnel SSH Local
-```bash
-ssh -i ~/azure-bioinformatica/keys/azure_bio_rsa \
-  -L 8888:localhost:8888 \
-  azureuser@<SEUIP>
+Abra no navegador local:
+
+```text
+http://127.0.0.1:8888/lab?token=<seu_token>
 ```
 
-### Ver Servidores Jupyter
+### Configurar Azure CLI Dentro da VM
 ```bash
-jupyter server list
+# Rode dentro da VM se quiser usar az storage direto dela.
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+az login --use-device-code
+
+mkdir -p ~/azure-bioinformatica/credentials
+
+cat > ~/azure-bioinformatica/credentials/.env << EOF
+AZ_RESOURCE_GROUP=rg-bioinformatica-lab
+AZ_LOCATION=brazilsouth
+AZ_VM_NAME=vm-bio-lab
+AZ_STORAGE_ACCOUNT=stbioseunome2026
+AZ_CONTAINER=raw-data
+EOF
+
+source ~/azure-bioinformatica/credentials/.env
 ```
 
 ---
@@ -289,12 +450,41 @@ EOF
 
 python3 ~/analisar_fastq.py teste.fastq > resultado.json
 
+# Opção dentro da VM: requer Azure CLI e .env configurados na VM
+source ~/azure-bioinformatica/credentials/.env
+
 az storage blob upload \
   --account-name $AZ_STORAGE_ACCOUNT \
   --container-name $AZ_CONTAINER \
   --name results/resultado.json \
   --file resultado.json \
-  --auth-mode login
+  --auth-mode login \
+  --overwrite
+```
+
+### Copiar Resultado da VM para o Notebook
+```bash
+# Rode no terminal local, fora do SSH
+source ~/azure-bioinformatica/credentials/.env
+
+export AZ_VM_IP=$(az vm show \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_VM_NAME \
+  --show-details \
+  --query publicIps \
+  --output tsv)
+
+scp -i ~/azure-bioinformatica/keys/azure_bio_rsa \
+  azureuser@$AZ_VM_IP:/home/azureuser/datasets/resultado.json \
+  ~/azure-bioinformatica/data/resultado.json
+
+az storage blob upload \
+  --account-name $AZ_STORAGE_ACCOUNT \
+  --container-name $AZ_CONTAINER \
+  --name results/resultado.json \
+  --file ~/azure-bioinformatica/data/resultado.json \
+  --auth-mode login \
+  --overwrite
 ```
 
 ### Pipeline FASTQ para BAM
@@ -318,6 +508,55 @@ az storage blob upload \
 
 ---
 
+## SQLITE
+
+### Criar Banco na VM
+```bash
+sudo apt install -y sqlite3
+
+sqlite3 ~/datasets/resultados.db << 'EOF'
+CREATE TABLE IF NOT EXISTS fastq_resultados (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  arquivo TEXT,
+  total_reads INTEGER,
+  tamanho_medio REAL,
+  qualidade_media REAL,
+  criado_em TEXT DEFAULT CURRENT_TIMESTAMP
+);
+EOF
+```
+
+### Consultar no Terminal
+```bash
+sqlite3 ~/datasets/resultados.db ".tables"
+sqlite3 ~/datasets/resultados.db "SELECT * FROM fastq_resultados;"
+```
+
+### Ver no JupyterLab
+```python
+import sqlite3
+import pandas as pd
+
+conn = sqlite3.connect("/home/azureuser/datasets/resultados.db")
+df = pd.read_sql_query("SELECT * FROM fastq_resultados", conn)
+df
+```
+
+### Upload do Banco
+```bash
+az storage blob upload \
+  --account-name $AZ_STORAGE_ACCOUNT \
+  --container-name $AZ_CONTAINER \
+  --name results/resultados.db \
+  --file ~/datasets/resultados.db \
+  --auth-mode login \
+  --overwrite
+```
+
+No Azure Portal, o SQLite aparece como arquivo em `Storage accounts > Containers > raw-data > results/resultados.db`. O portal permite baixar o arquivo, mas não abre as tabelas.
+
+---
+
 ## MONITORAR CUSTOS
 
 ### Listar Recursos do Grupo
@@ -327,11 +566,17 @@ az resource list \
   --output table
 ```
 
-### Ver Uso de VM
+### Ver Uso e Estado de VM
 ```bash
 az vm list \
   --resource-group $AZ_RESOURCE_GROUP \
   --show-details \
+  --output table
+
+az vm get-instance-view \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_VM_NAME \
+  --query instanceView.statuses[].displayStatus \
   --output table
 ```
 
@@ -373,6 +618,33 @@ az provider register --namespace Microsoft.Network
 ```bash
 export AZ_STORAGE_ACCOUNT="stbio$RANDOM$RANDOM"
 echo $AZ_STORAGE_ACCOUNT
+
+az storage account create \
+  --name $AZ_STORAGE_ACCOUNT \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --location $AZ_LOCATION \
+  --sku Standard_LRS \
+  --kind StorageV2
+```
+
+### Erro: Failed to resolve blob.core.windows.net
+```bash
+# 1. Confirmar se a conta existe
+az storage account show \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_STORAGE_ACCOUNT \
+  --output table
+
+# 2. Se nao existir, criar a conta antes do container
+az storage account create \
+  --name $AZ_STORAGE_ACCOUNT \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --location $AZ_LOCATION \
+  --sku Standard_LRS \
+  --kind StorageV2
+
+# 3. Se existir, testar DNS/rede local
+nslookup ${AZ_STORAGE_ACCOUNT}.blob.core.windows.net
 ```
 
 ### Erro: AuthorizationPermissionMismatch no Blob
@@ -380,26 +652,60 @@ echo $AZ_STORAGE_ACCOUNT
 # Confirme login
 az account show --output table
 
-# Use --auth-mode login
+# Atribuir permissao de dados ao usuario logado
+export AZ_USER_OBJECT_ID=$(az ad signed-in-user show --query id --output tsv)
+
+export AZ_STORAGE_SCOPE=$(az storage account show \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_STORAGE_ACCOUNT \
+  --query id \
+  --output tsv)
+
+az role assignment create \
+  --assignee $AZ_USER_OBJECT_ID \
+  --role "Storage Blob Data Contributor" \
+  --scope $AZ_STORAGE_SCOPE
+
+# Aguardar 1 a 5 minutos e testar
 az storage blob list \
   --account-name $AZ_STORAGE_ACCOUNT \
   --container-name $AZ_CONTAINER \
   --auth-mode login
 ```
 
-### Erro: SSH Connection Timed Out
+### Alternativa de Laboratorio: Auth Mode Key
 ```bash
-# Ver IP público
+az storage blob upload \
+  --account-name $AZ_STORAGE_ACCOUNT \
+  --container-name $AZ_CONTAINER \
+  --name raw-data/arquivo.fastq \
+  --file arquivo.fastq \
+  --auth-mode key
+```
+
+### Erro: SSH Connection Refused ou Timed Out
+```bash
+# Ver estado e IP publico da VM
 az vm show \
   --resource-group $AZ_RESOURCE_GROUP \
   --name $AZ_VM_NAME \
   --show-details \
-  --query publicIps \
-  --output tsv
+  --query "[powerState, publicIps]" \
+  --output table
 
 # Abrir porta 22
 az vm open-port \
   --resource-group $AZ_RESOURCE_GROUP \
   --name $AZ_VM_NAME \
   --port 22
+
+# Salvar IP publico correto
+export AZ_VM_IP=$(az vm show \
+  --resource-group $AZ_RESOURCE_GROUP \
+  --name $AZ_VM_NAME \
+  --show-details \
+  --query publicIps \
+  --output tsv)
+
+ssh -i ~/azure-bioinformatica/keys/azure_bio_rsa azureuser@$AZ_VM_IP
 ```

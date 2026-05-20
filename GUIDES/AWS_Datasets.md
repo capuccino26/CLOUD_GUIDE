@@ -39,16 +39,6 @@ fasterq-dump SRR1234567  # (exemplo)
 - Procurar por palavra-chave (ex: "Arabidopsis")
 - Copiar ID (SRRxxx)
 
-**Vantagens:**
-- ✓ Completamente grátis
-- ✓ Pré-publicado (citável)
-- ✓ Milhões de datasets
-- ✓ Inclui metadados
-
-**Desvantagens:**
-- ✗ Requer descompactação (compactados)
-- ✗ Às vezes dados estranhos
-
 ---
 
 ### **1000 Genomes Project**
