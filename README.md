@@ -2,7 +2,7 @@
 
 ## Language / Idioma
 
-### English first
+### English
 Use these links if you want the English version of the course:
 
 - [Local setup](SETUP_LOCAL_EN.md)
